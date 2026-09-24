@@ -71,7 +71,9 @@ Ningún nivel del emini, TSLA, KMX, DIS ni MU debe aparecer como operación.
 ## Configuración (variables de Actions, todas opcionales)
 
 `SENDER` (tictoctrading@substack.com) · `LLM_PROVIDER` (gemini | claude) · `GEMINI_MODEL`
-(gemini-flash-latest) · `LOOKBACK_DAYS` (7) · `OPTION_TYPES` (call) · `NOTIFY_EMPTY` (true).
+(gemini-flash-latest; el usuario tiene fijado `gemini-3.5-flash`) · `LOOKBACK_DAYS` (7) · `OPTION_TYPES`
+(call) · `NOTIFY_EMPTY` (true) · `CHUNK_CHARS` (12000; el texto se trocea porque los emails largos
+daban 503 en Gemini y los cortos no).
 Secrets: `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`.
 
 ## Guía de depuración
@@ -83,7 +85,7 @@ Secrets: `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID
 | `HTTPError: HTTP Error 404` en un email | Nombre de modelo de Gemini no válido | Revisar la lista de modelos en ai.google.dev y fijar `GEMINI_MODEL` |
 | `HTTP Error 400/403` (Gemini) | API key inválida o región sin capa gratuita | Regenerar la key en AI Studio |
 | `HTTP Error 429` | Límite de la capa gratuita | `_post_json` reintenta 2 veces (10 s, 30 s); si no, en la siguiente ejecución. Si persiste, reducir frecuencia |
-| `HTTP Error 503/500` (Gemini) | Modelo saturado (frecuente en capa gratuita) | Igual que 429. Si persiste días, probar otro modelo con `GEMINI_MODEL` |
+| `HTTP Error 503/500` (Gemini) | Modelo saturado o texto demasiado largo (los emails largos fallaban y los cortos no) | Mirar los caracteres/trozos del log y el motivo tras `·`; bajar `CHUNK_CHARS` o cambiar `GEMINI_MODEL` |
 | `InvalidURL: ... control characters` | Secret pegado con salto de línea | `_secret()` ya hace `strip()`; si reaparece, algún secret se lee sin `_secret()` |
 | `KeyError: 'candidates'` | Gemini bloqueó o devolvió respuesta vacía | Probar en local con `--file` y ajustar `PROMPT` |
 | `ValueError: respuesta del LLM sin JSON` / `JSONDecodeError` | Salida mal formada | Probar en local; endurecer `PROMPT` o `parse_trades` |
@@ -110,5 +112,7 @@ añadiendo prints en Actions.
 tiene claves reales), bot de Telegram creado, 5 secrets metidos por la web (`gh` no está instalado
 en el equipo del usuario). Remitente confirmado: `tictoctrading@substack.com`. Primera ejecución:
 login de Gmail OK (5 emails pendientes), pero Gemini devolvió 503 y el secret `TELEGRAM_TOKEN`
-tenía un salto de línea; corregido con reintentos y `_secret()`. Pendiente: nueva ejecución y
-verificar mensaje en Telegram y etiqueta en Gmail. Actualiza esta sección cuando cambie el estado.
+tenía un salto de línea; corregido con reintentos y `_secret()`. Con `gemini-3.5-flash`: Telegram
+OK, 3 emails cortos (notificaciones de pago/chat, no newsletter) procesados; los 2 largos (la
+newsletter real) seguían dando 503 → se añade troceo (`split_text`). Pendiente: comprobar que la
+newsletter real sale bien y que las calls coinciden con el texto. Actualiza esta sección cuando cambie el estado.

@@ -33,6 +33,8 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").lower()   # "gemini" | "
 OPTION_TYPES = {s.strip() for s in os.environ.get("OPTION_TYPES", "call").lower().split(",")}
 NOTIFY_EMPTY = os.environ.get("NOTIFY_EMPTY", "true").lower() == "true"
 MAX_CHARS = 60_000
+CHUNK_CHARS = int(os.environ.get("CHUNK_CHARS", "12000"))   # textos largos dan 503 en la capa gratuita
+CHUNK_OVERLAP = 800                                           # para no partir una recomendación entre trozos
 RETRY_STATUS = {429, 500, 502, 503, 504}   # errores HTTP temporales que merece la pena reintentar
 RETRY_WAITS = (10, 30)                      # segundos de espera entre intentos
 
@@ -61,6 +63,18 @@ Rules:
 def _secret(name: str) -> str:
     """Devuelve la variable de entorno sin espacios ni saltos de línea (frecuentes al pegar secrets)."""
     return os.environ[name].strip()
+
+
+def _error_detail(ex: Exception) -> str:
+    """Devuelve tipo y mensaje del error (con el motivo que da la API si es HTTP), truncado a 200."""
+    msg = str(ex)
+    if isinstance(ex, urllib.error.HTTPError):
+        try:
+            body = json.loads(ex.read())
+            msg += " · " + str(body.get("error", {}).get("message") or body.get("description") or "")
+        except Exception:   # noqa: BLE001 — el cuerpo del error es opcional
+            pass
+    return f"{type(ex).__name__}: {msg}"[:200]
 
 
 def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> dict:
@@ -141,10 +155,33 @@ def parse_trades(raw: str) -> list[dict]:
     return trades
 
 
+def split_text(text: str) -> list[str]:
+    """Devuelve el texto en trozos de ≤CHUNK_CHARS, cortando por párrafos y con solapamiento."""
+    chunks, start = [], 0
+    while len(text) - start > CHUNK_CHARS:
+        end = start + CHUNK_CHARS
+        cut = max(text.rfind("\n\n", start, end), text.rfind("\n", start, end))
+        if cut <= start + CHUNK_CHARS // 2:   # sin salto de línea útil: cortar en un espacio
+            cut = text.rfind(" ", start, end)
+        if cut <= start + CHUNK_CHARS // 2:
+            cut = end
+        chunks.append(text[start:cut])
+        start = max(cut - CHUNK_OVERLAP, start + 1)
+    chunks.append(text[start:])
+    return chunks
+
+
 def extract_trades(text: str) -> list[dict]:
-    """Devuelve las operaciones de opciones encontradas en el texto."""
+    """Devuelve las operaciones de opciones encontradas en el texto, sin duplicados entre trozos."""
     fn = {"gemini": _call_gemini, "claude": _call_claude}[LLM_PROVIDER]
-    return parse_trades(fn(text[:MAX_CHARS]))
+    trades, seen = [], set()
+    for chunk in split_text(text[:MAX_CHARS]):
+        for t in parse_trades(fn(chunk)):
+            key = (t["ticker"], t["option_type"], (t["expiry"] or "").lower(), t["strike"])
+            if key not in seen:
+                seen.add(key)
+                trades.append(t)
+    return trades
 
 
 # ---------------------------------------------------------------- email
@@ -241,7 +278,10 @@ def run_gmail(dry_run: bool) -> int:
             _, msg_data = imap.uid("fetch", uid, "(BODY.PEEK[])")   # PEEK: no marca como leído
             msg = email.message_from_bytes(msg_data[0][1], policy=default_policy)
             subject = str(msg.get("subject", "(sin asunto)"))
-            trades = extract_trades(email_to_text(msg))
+            text = email_to_text(msg)
+            print(f"Email {i}/{len(uids)}: {len(text)} caracteres, "   # solo contadores: logs públicos
+                  f"{len(split_text(text[:MAX_CHARS]))} trozo(s)")
+            trades = extract_trades(text)
             messages = [format_trade(t, subject) for t in trades]
             if not trades and NOTIFY_EMPTY:
                 messages = [f"📭 Newsletter procesada, sin calls:\n{html.escape(subject)}"]
@@ -253,7 +293,7 @@ def run_gmail(dry_run: bool) -> int:
             print(f"Email {i}/{len(uids)}: {len(trades)} operación(es)")   # sin contenido: logs públicos
         except Exception as ex:   # noqa: BLE001 — un email roto no debe parar el resto
             errors += 1
-            print(f"Email {i}/{len(uids)}: ERROR {type(ex).__name__}: {str(ex)[:200]}")
+            print(f"Email {i}/{len(uids)}: ERROR {_error_detail(ex)}")
     imap.logout()
 
     print(f"Total operaciones: {n_trades} · errores: {errors}")
