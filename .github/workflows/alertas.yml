@@ -1,0 +1,47 @@
+name: alertas-opciones
+
+on:
+  schedule:
+    # FRECUENCIA (hora UTC). Cada 6 h, en el minuto 17 para evitar la congestión de las horas en punto.
+    # Ejemplos: cada 12 h -> "17 */12 * * *" · a las 8 y 20 UTC -> "17 8,20 * * *"
+    - cron: "17 */6 * * *"
+  workflow_dispatch:   # botón "Run workflow" para ejecutarlo a mano
+
+permissions:
+  contents: read
+  actions: write       # solo para el keepalive
+
+concurrency:
+  group: alertas
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ejecutar bot
+        run: python3 bot.py
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Opcionales (Settings > Secrets and variables > Actions > Variables):
+          SENDER: ${{ vars.SENDER || 'tictoctrading@substack.com' }}
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-flash-latest' }}
+          LOOKBACK_DAYS: ${{ vars.LOOKBACK_DAYS || '7' }}
+          OPTION_TYPES: ${{ vars.OPTION_TYPES || 'call' }}
+          NOTIFY_EMPTY: ${{ vars.NOTIFY_EMPTY || 'true' }}
+
+      # GitHub desactiva los cron tras 60 días sin actividad en el repo; esto lo evita sin hacer commits.
+      - name: Keepalive
+        if: github.event_name == 'schedule'
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/alertas.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,7 @@
+# Nunca subir contenido de la newsletter (es de pago y el repo es público)
+samples/
+*.txt
+*.eml
+.env
+.claude/settings.local.json
+__pycache__/
