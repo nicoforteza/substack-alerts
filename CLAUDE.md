@@ -72,8 +72,11 @@ Ningún nivel del emini, TSLA, KMX, DIS ni MU debe aparecer como operación.
 
 `SENDER` (tictoctrading@substack.com) · `LLM_PROVIDER` (gemini | claude) · `GEMINI_MODEL`
 (gemini-flash-latest; el usuario tiene fijado `gemini-3.5-flash`) · `LOOKBACK_DAYS` (7) · `OPTION_TYPES`
-(call) · `NOTIFY_EMPTY` (true) · `CHUNK_CHARS` (12000; el texto se trocea porque los emails largos
-daban 503 en Gemini y los cortos no).
+(call) · `NOTIFY_EMPTY` (true) · `CHUNK_CHARS` (12000) · `ANTHROPIC_MODEL` (claude-opus-5; con
+Opus/Sonnet se envía `effort: low` + `fallbacks: "default"` y NUNCA `temperature`, que da 400) ·
+`SKIP_REGEX` (frases de notificaciones de Substack: bienvenida, recibo, código de acceso, hilo del
+chat; se buscan solo en asunto + primeros 400 caracteres, y esos emails se etiquetan sin avisar).
+Secret adicional si `LLM_PROVIDER=claude`: `ANTHROPIC_API_KEY`.
 Secrets: `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `GEMINI_API_KEY`.
 
 ## Guía de depuración
@@ -114,5 +117,9 @@ en el equipo del usuario). Remitente confirmado: `tictoctrading@substack.com`. P
 login de Gmail OK (5 emails pendientes), pero Gemini devolvió 503 y el secret `TELEGRAM_TOKEN`
 tenía un salto de línea; corregido con reintentos y `_secret()`. Con `gemini-3.5-flash`: Telegram
 OK, 3 emails cortos (notificaciones de pago/chat, no newsletter) procesados; los 2 largos (la
-newsletter real) seguían dando 503 → se añade troceo (`split_text`). Pendiente: comprobar que la
-newsletter real sale bien y que las calls coinciden con el texto. Actualiza esta sección cuando cambie el estado.
+newsletter real) seguían dando 503 → se añade troceo (`split_text`), pero luego falló también un
+email de 424 caracteres: era saturación de Gemini, no tamaño. El usuario decide pasar a Claude
+Opus 5 (coste estimado <1 $/mes con una newsletter cada ~3 días) y filtrar notificaciones
+(`is_notification`). `ANTHROPIC_API_KEY` ya está en secrets. Pendiente: variable
+`LLM_PROVIDER=claude`, ejecutar y comprobar que las calls coinciden con la newsletter.
+Actualiza esta sección cuando cambie el estado.

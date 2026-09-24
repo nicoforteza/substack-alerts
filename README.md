@@ -26,6 +26,8 @@ No tiene dependencias externas (solo librería estándar de Python).
 | Variable | `SENDER` | `tictoctrading@substack.com` | Remitente a vigilar |
 | Variable | `LLM_PROVIDER` | `gemini` | `gemini` o `claude` (requiere secret `ANTHROPIC_API_KEY`) |
 | Variable | `GEMINI_MODEL` | `gemini-flash-latest` | Modelo de Gemini |
+| Variable | `ANTHROPIC_MODEL` | `claude-opus-5` | Modelo de Claude (p. ej. `claude-haiku-4-5`, más barato) |
+| Variable | `SKIP_REGEX` | ver `bot.py` | Frases que identifican notificaciones de Substack (no se envían) |
 | Variable | `LOOKBACK_DAYS` | `7` | Antigüedad máxima de emails a revisar |
 | Variable | `OPTION_TYPES` | `call` | `call`, `put` o `call,put` |
 | Variable | `NOTIFY_EMPTY` | `true` | Avisar también si la newsletter no trae calls |

@@ -35,7 +35,16 @@ NOTIFY_EMPTY = os.environ.get("NOTIFY_EMPTY", "true").lower() == "true"
 MAX_CHARS = 60_000
 CHUNK_CHARS = int(os.environ.get("CHUNK_CHARS", "12000"))   # textos largos dan 503 en la capa gratuita
 CHUNK_OVERLAP = 800                                           # para no partir una recomendación entre trozos
-RETRY_STATUS = {429, 500, 502, 503, 504}   # errores HTTP temporales que merece la pena reintentar
+# Emails de Substack que no son la newsletter (bienvenida, recibos, códigos de acceso, hilos del chat).
+# Se buscan solo en el asunto y el principio del cuerpo: las newsletters mencionan "chat" en el pie.
+SKIP_REGEX = os.environ.get("SKIP_REGEX") or (
+    r"good to have you here"                  # bienvenida
+    r"|\breceipt\b"                           # recibo de pago
+    r"|verification code"                     # código para iniciar sesión
+    r"|started a thread|join the chat for"    # hilo del chat de suscriptores
+)
+SKIP_HEAD_CHARS = 400
+RETRY_STATUS = {429, 500, 502, 503, 504, 529}   # errores HTTP temporales (529 = Anthropic saturado)
 RETRY_WAITS = (10, 30)                      # segundos de espera entre intentos
 
 PROMPT = """You extract OPTION BUY recommendations from a trading newsletter.
@@ -109,13 +118,23 @@ def _call_gemini(text: str) -> str:
 
 def _call_claude(text: str) -> str:
     """Devuelve el texto de respuesta de Claude."""
+    model = os.environ.get("ANTHROPIC_MODEL") or "claude-opus-5"
     payload = {
-        "model": os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
-        "max_tokens": 2000, "temperature": 0, "system": PROMPT,
+        "model": model, "max_tokens": 16000, "system": PROMPT,
         "messages": [{"role": "user", "content": text}],
     }
-    r = _post_json("https://api.anthropic.com/v1/messages", payload,
-                   {"x-api-key": _secret("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"})
+    headers = {"x-api-key": _secret("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"}
+    if "haiku" in model:
+        payload["temperature"] = 0            # Opus/Sonnet actuales rechazan temperature (400)
+    else:
+        payload["output_config"] = {"effort": "low"}   # extracción sencilla: menos razonamiento, menos coste
+        payload["fallbacks"] = "default"               # si el modelo rechaza la petición, otro la reintenta
+        headers["anthropic-beta"] = "server-side-fallback-2026-07-01"
+    r = _post_json("https://api.anthropic.com/v1/messages", payload, headers, timeout=300)
+    if r.get("stop_reason") == "refusal":
+        raise ValueError("Claude rechazó la petición")
+    if r.get("stop_reason") == "max_tokens":
+        raise ValueError("respuesta de Claude cortada por max_tokens")
     return "".join(b.get("text", "") for b in r["content"] if b.get("type") == "text")
 
 
@@ -205,6 +224,12 @@ def email_to_text(msg: email.message.EmailMessage) -> str:
     return re.sub(r"https?://\S+", "", content)
 
 
+def is_notification(subject: str, text: str) -> bool:
+    """Devuelve True si el email es una notificación de Substack y no la newsletter."""
+    head = f"{subject}\n{text[:SKIP_HEAD_CHARS]}"
+    return re.search(SKIP_REGEX, head, re.IGNORECASE) is not None
+
+
 def _all_mail_folder(imap: imaplib.IMAP4_SSL) -> str:
     """Devuelve el nombre de 'Todos' en Gmail (depende del idioma), o INBOX."""
     _, folders = imap.list()
@@ -279,6 +304,11 @@ def run_gmail(dry_run: bool) -> int:
             msg = email.message_from_bytes(msg_data[0][1], policy=default_policy)
             subject = str(msg.get("subject", "(sin asunto)"))
             text = email_to_text(msg)
+            if is_notification(subject, text):
+                if not dry_run:
+                    imap.uid("store", uid, "+X-GM-LABELS", f"({PROCESSED_LABEL})")
+                print(f"Email {i}/{len(uids)}: notificación de Substack, omitido")
+                continue
             print(f"Email {i}/{len(uids)}: {len(text)} caracteres, "   # solo contadores: logs públicos
                   f"{len(split_text(text[:MAX_CHARS]))} trozo(s)")
             trades = extract_trades(text)

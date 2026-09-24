@@ -35,6 +35,7 @@ jobs:
           SENDER: ${{ vars.SENDER || 'tictoctrading@substack.com' }}
           LLM_PROVIDER: ${{ vars.LLM_PROVIDER || 'gemini' }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-flash-latest' }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || 'claude-opus-5' }}
           LOOKBACK_DAYS: ${{ vars.LOOKBACK_DAYS || '7' }}
           OPTION_TYPES: ${{ vars.OPTION_TYPES || 'call' }}
           NOTIFY_EMPTY: ${{ vars.NOTIFY_EMPTY || 'true' }}
