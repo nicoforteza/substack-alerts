@@ -18,7 +18,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20   # holgura para los reintentos ante errores temporales del LLM
     steps:
       - uses: actions/checkout@v4
 

@@ -82,7 +82,9 @@ Secrets: `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID
 | `Emails pendientes: 0` y sí hay newsletter | `SENDER` no coincide, email más antiguo que `LOOKBACK_DAYS`, o ya etiquetado | Comprobar el "De" real; subir `LOOKBACK_DAYS`; quitar la etiqueta en Gmail |
 | `HTTPError: HTTP Error 404` en un email | Nombre de modelo de Gemini no válido | Revisar la lista de modelos en ai.google.dev y fijar `GEMINI_MODEL` |
 | `HTTP Error 400/403` (Gemini) | API key inválida o región sin capa gratuita | Regenerar la key en AI Studio |
-| `HTTP Error 429` | Límite de la capa gratuita | Se reintenta sola en la siguiente ejecución; si persiste, reducir frecuencia |
+| `HTTP Error 429` | Límite de la capa gratuita | `_post_json` reintenta 2 veces (10 s, 30 s); si no, en la siguiente ejecución. Si persiste, reducir frecuencia |
+| `HTTP Error 503/500` (Gemini) | Modelo saturado (frecuente en capa gratuita) | Igual que 429. Si persiste días, probar otro modelo con `GEMINI_MODEL` |
+| `InvalidURL: ... control characters` | Secret pegado con salto de línea | `_secret()` ya hace `strip()`; si reaparece, algún secret se lee sin `_secret()` |
 | `KeyError: 'candidates'` | Gemini bloqueó o devolvió respuesta vacía | Probar en local con `--file` y ajustar `PROMPT` |
 | `ValueError: respuesta del LLM sin JSON` / `JSONDecodeError` | Salida mal formada | Probar en local; endurecer `PROMPT` o `parse_trades` |
 | Telegram `HTTP Error 400` | `chat_id` erróneo o HTML inválido en el mensaje | Verificar `chat_id` con getUpdates; revisar escapado en `format_trade` |
@@ -104,7 +106,9 @@ añadiendo prints en Actions.
 
 ## Estado de la puesta en marcha
 
-Pendiente de confirmar con el usuario. Pasos: subir estos ficheros al repo → crear bot de Telegram
-y obtener `chat_id` → contraseña de aplicación de Gmail → API key de Gemini → comprobar remitente →
-`gh secret set` de los 5 secrets → `gh workflow run alertas.yml` → verificar mensaje en Telegram y
-etiqueta en Gmail. Actualiza esta sección cuando cambie el estado.
+2026-09-24: ficheros subidos (salvo `.env.example`, pendiente de que el usuario confirme que no
+tiene claves reales), bot de Telegram creado, 5 secrets metidos por la web (`gh` no está instalado
+en el equipo del usuario). Remitente confirmado: `tictoctrading@substack.com`. Primera ejecución:
+login de Gmail OK (5 emails pendientes), pero Gemini devolvió 503 y el secret `TELEGRAM_TOKEN`
+tenía un salto de línea; corregido con reintentos y `_secret()`. Pendiente: nueva ejecución y
+verificar mensaje en Telegram y etiqueta en Gmail. Actualiza esta sección cuando cambie el estado.

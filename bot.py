@@ -20,6 +20,8 @@ import json
 import os
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 from email.policy import default as default_policy
 
@@ -31,6 +33,8 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "gemini").lower()   # "gemini" | "
 OPTION_TYPES = {s.strip() for s in os.environ.get("OPTION_TYPES", "call").lower().split(",")}
 NOTIFY_EMPTY = os.environ.get("NOTIFY_EMPTY", "true").lower() == "true"
 MAX_CHARS = 60_000
+RETRY_STATUS = {429, 500, 502, 503, 504}   # errores HTTP temporales que merece la pena reintentar
+RETRY_WAITS = (10, 30)                      # segundos de espera entre intentos
 
 PROMPT = """You extract OPTION BUY recommendations from a trading newsletter.
 Return ONLY a JSON object, no prose, no markdown fences:
@@ -53,15 +57,26 @@ Rules:
 - If there is none, return {"trades": []}."""
 
 
-# ---------------------------------------------------------------- utilidades HTTP
+# ---------------------------------------------------------------- utilidades
+def _secret(name: str) -> str:
+    """Devuelve la variable de entorno sin espacios ni saltos de línea (frecuentes al pegar secrets)."""
+    return os.environ[name].strip()
+
+
 def _post_json(url: str, payload: dict, headers: dict, timeout: int = 120) -> dict:
-    """Devuelve la respuesta JSON de un POST."""
+    """Devuelve la respuesta JSON de un POST, reintentando los errores HTTP temporales."""
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode(), method="POST",
         headers={"Content-Type": "application/json", **headers},
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.load(resp)
+    for wait in (*RETRY_WAITS, None):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as ex:
+            if wait is None or ex.code not in RETRY_STATUS:
+                raise
+            time.sleep(wait)
 
 
 # ---------------------------------------------------------------- LLM
@@ -74,7 +89,7 @@ def _call_gemini(text: str) -> str:
         "contents": [{"role": "user", "parts": [{"text": text}]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
     }
-    r = _post_json(url, payload, {"x-goog-api-key": os.environ["GEMINI_API_KEY"]})
+    r = _post_json(url, payload, {"x-goog-api-key": _secret("GEMINI_API_KEY")})
     return "".join(p.get("text", "") for p in r["candidates"][0]["content"]["parts"])
 
 
@@ -86,7 +101,7 @@ def _call_claude(text: str) -> str:
         "messages": [{"role": "user", "content": text}],
     }
     r = _post_json("https://api.anthropic.com/v1/messages", payload,
-                   {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": "2023-06-01"})
+                   {"x-api-key": _secret("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"})
     return "".join(b.get("text", "") for b in r["content"] if b.get("type") == "text")
 
 
@@ -192,8 +207,8 @@ def format_trade(t: dict, subject: str) -> str:
 
 def send_telegram(text: str) -> None:
     """Envía un mensaje al chat configurado."""
-    url = f"https://api.telegram.org/bot{os.environ['TELEGRAM_TOKEN']}/sendMessage"
-    _post_json(url, {"chat_id": os.environ["TELEGRAM_CHAT_ID"], "text": text[:4000],
+    url = f"https://api.telegram.org/bot{_secret('TELEGRAM_TOKEN')}/sendMessage"
+    _post_json(url, {"chat_id": _secret("TELEGRAM_CHAT_ID"), "text": text[:4000],
                      "parse_mode": "HTML", "disable_web_page_preview": True}, {})
 
 
@@ -210,7 +225,7 @@ def run_file(path: str) -> None:
 def run_gmail(dry_run: bool) -> int:
     """Procesa los emails pendientes; devuelve el número de errores."""
     imap = imaplib.IMAP4_SSL("imap.gmail.com")
-    imap.login(os.environ["GMAIL_USER"], os.environ["GMAIL_APP_PASSWORD"])
+    imap.login(_secret("GMAIL_USER"), _secret("GMAIL_APP_PASSWORD"))
     folder = _all_mail_folder(imap)
     typ, _ = imap.select(f'"{folder}"')
     assert typ == "OK", f"no se pudo abrir la carpeta {folder!r}"
